@@ -4,6 +4,10 @@
 #include <inttypes.h>
 #include "application.h"
 
+#define DS1820 1
+#define DS1822 2
+#define DS2438 3
+
 // you can exclude onewire_search by defining that to 0
 #ifndef ONEWIRE_SEARCH
 #define ONEWIRE_SEARCH 1
@@ -132,6 +136,7 @@ private:
 #endif
 
   public:
+    uint8_t selectedRom[8];
     OneWire( uint16_t pin);
 
     // Perform a 1-Wire reset cycle. Returns 1 if a device responds
@@ -232,6 +237,12 @@ private:
     static uint16_t crc16(const uint8_t* input, uint16_t len, uint16_t crc = 0);
 #endif
 #endif
+    byte getType(uint8_t *addr);
+    bool isTemp(uint8_t *addr);
+    String printRomID();
+    String printRomID(uint8_t *rom);
+    float readTemperature(uint8_t *addr);
+    float readTemperature(uint8_t *addr, uint8_t tries);
 };
 
 #endif

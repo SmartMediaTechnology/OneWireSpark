@@ -16,10 +16,10 @@ Support for Photon added by Brendan Albano and cdrodriguez
 I made monor tweeks to allow use in the web builder and created this repository for
 use in the contributed libs list.
 
-6/2014 - Hotaman 
+6/2014 - Hotaman
 
-I've taken the code that Spark Forum user tidwelltimj posted 
-split it back into separte code and header files and put back in the 
+I've taken the code that Spark Forum user tidwelltimj posted
+split it back into separte code and header files and put back in the
 credits and comments and got it compiling on the command line within SparkCore core-firmware
 
 
@@ -258,7 +258,7 @@ uint8_t OneWire::read_bit(void)
 // go tri-state at the end of the write to avoid heating in a short or
 // other mishap.
 //
-void OneWire::write(uint8_t v, uint8_t power /* = 0 */) 
+void OneWire::write(uint8_t v, uint8_t power /* = 0 */)
 {
     uint8_t bitMask;
 
@@ -276,7 +276,7 @@ void OneWire::write(uint8_t v, uint8_t power /* = 0 */)
     }
 }
 
-void OneWire::write_bytes(const uint8_t *buf, uint16_t count, bool power /* = 0 */) 
+void OneWire::write_bytes(const uint8_t *buf, uint16_t count, bool power /* = 0 */)
 {
     for (uint16_t i = 0 ; i < count ; i++)
         write(buf[i]);
@@ -294,7 +294,7 @@ void OneWire::write_bytes(const uint8_t *buf, uint16_t count, bool power /* = 0 
 //
 // Read a byte
 //
-uint8_t OneWire::read() 
+uint8_t OneWire::read()
 {
     uint8_t bitMask;
     uint8_t r = 0;
@@ -306,7 +306,7 @@ uint8_t OneWire::read()
     return r;
 }
 
-void OneWire::read_bytes(uint8_t *buf, uint16_t count) 
+void OneWire::read_bytes(uint8_t *buf, uint16_t count)
 {
     for (uint16_t i = 0 ; i < count ; i++)
         buf[i] = read();
@@ -320,8 +320,10 @@ void OneWire::select(const uint8_t rom[8])
     uint8_t i;
 
     write(0x55);           // Choose ROM
-
-    for (i = 0; i < 8; i++) write(rom[i]);
+    for (i = 0; i < 8; i++) {
+        write(rom[i]);
+        selectedRom[i] = rom[i];
+    }
 }
 
 //
@@ -572,4 +574,138 @@ uint16_t OneWire::crc16(const uint8_t* input, uint16_t len, uint16_t crc)
 
     return crc;
 }
+
 #endif
+
+
+byte OneWire::getType(uint8_t *addr) {
+  switch (addr[0]) {
+    case 0x10:
+      // Serial.println("  Chip = DS1820/DS18S20");
+      return DS1820;
+      break;
+    case 0x28:
+      // Serial.println("  Chip = DS18B20");
+      return DS1822;
+      break;
+    case 0x22:
+      // Serial.println("  Chip = DS1822");
+      return DS1822;
+      break;
+    case 0x26:
+      // Serial.println("  Chip = DS2438");
+      return DS2438;
+      break;
+    default:
+      Serial.printlnf("No or unknown temperature chip: 0x%02X", addr[0]);
+      printRomID(addr);
+      return 0;
+  }
+};
+
+bool OneWire::isTemp(uint8_t *addr)
+{
+  byte type = OneWire::getType(addr);
+  return (type == DS1820 || type == DS1822 || type == DS2438);
+};
+
+String OneWire::printRomID()
+{
+  return OneWire::printRomID(selectedRom);
+};
+
+String OneWire::printRomID(uint8_t *addr)
+{
+  String str = "";
+  for (uint8_t i=0; i<8; i++) {
+    if (i > 0) str.concat(":");
+    str.concat(String::format("%02X", addr[i]));
+  }
+  return str;
+}
+
+float OneWire::readTemperature(uint8_t *addr)
+{
+  return OneWire::readTemperature(addr, 5);
+}
+
+float OneWire::readTemperature(uint8_t *addr, uint8_t tries)
+{
+  byte data[12];
+  float celsius = -9999;
+  // first make sure current values are in the scratch pad
+  OneWire::reset();
+  OneWire::select(addr);
+  OneWire::write(0xB8,0);         // Recall Memory 0
+  OneWire::write(0x00,0);         // Recall Memory 0
+
+  // now read the scratch pad
+  OneWire::reset();
+  OneWire::select(addr);
+  OneWire::write(0xBE,0);         // Read Scratchpad
+  //if (OneWireDevice->getType() == DS2438) {
+  //  OneWire::write(0x00,0);       // The DS2438 needs a page# to read
+  //}
+
+  // transfer and print the values
+  // Serial.print("  Data = ");
+  // Serial.print(present, HEX);
+  // Serial.print(" ");
+  for ( uint8_t i = 0; i < 9; i++) {           // we need 9 bytes
+    data[i] = OneWire::read();
+    // Serial.print(data[i], HEX);
+    // Serial.print(" ");
+  }
+
+  if (OneWire::crc8(data, 8) != data[8])
+  {
+    tries--;
+    Serial.printf("Invalid CRC8: %02X != %02X, tries left: %d", OneWire::crc8(data, 8), data[8], tries);
+    if (tries > 0)
+    {
+      Serial.println(",.. retrying");
+      return OneWire::readTemperature(addr, tries);
+    } else {
+        Serial.println(",.. no more tries FAILED");
+    }
+  } else {
+    // Convert the data to actual temperature
+    // because the result is a 16 bit signed integer, it should
+    // be stored to an "int16_t" type, which is always 16 bits
+    // even when compiled on a 32 bit processor.
+    int16_t raw = (data[1] << 8) | data[0];
+    if (OneWire::getType(addr) == DS2438) raw = (data[2] << 8) | data[1];
+    byte cfg = (data[4] & 0x60);
+
+    switch (OneWire::getType(addr)) {
+      case DS1820:
+        raw = raw << 3; // 9 bit resolution default
+        if (data[7] == 0x10) {
+          // "count remain" gives full 12 bit resolution
+          raw = (raw & 0xFFF0) + 12 - data[6];
+        }
+        celsius = (float)raw * 0.0625;
+        break;
+      case DS1822:
+        // at lower res, the low bits are undefined, so let's zero them
+        if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
+        if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
+        if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
+        // default is 12 bit resolution, 750 ms conversion time
+        celsius = (float)raw * 0.0625;
+        break;
+
+      case DS2438:
+        data[1] = (data[1] >> 3) & 0x1f;
+        if (data[2] > 127) {
+          celsius = (float)data[2] - ((float)data[1] * .03125);
+        }else{
+          celsius = (float)data[2] + ((float)data[1] * .03125);
+        }
+    }
+
+    OneWire::write(0xB8,0);         // Recall Memory 0
+    OneWire::write(0x00,0);         // Recall Memory 0
+  }
+  return celsius;
+}
